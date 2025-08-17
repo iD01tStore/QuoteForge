@@ -1727,7 +1727,6 @@ class TemplatesTab(BaseTab):
 
         self.preview_text = ScrolledText(preview_frame, wrap=WORD, autohide=True)
         self.preview_text.grid(row=0, column=0, sticky='nsew')
-        self.preview_text.text['state'] = 'disabled'
 
         btn_frame = ttk.Frame(self)
         btn_frame.grid(row=1, column=1, sticky='e', pady=10)
@@ -1747,10 +1746,8 @@ class TemplatesTab(BaseTab):
 
         selected_template_name = self.template_list.get(selection_indices[0])
         content = self.templates[selected_template_name]
-        self.preview_text.text['state'] = 'normal'
         self.preview_text.delete('1.0', END)
         self.preview_text.insert(END, content)
-        self.preview_text.text['state'] = 'disabled'
 
     def use_template(self):
         from tkinter import END
@@ -1863,9 +1860,7 @@ class LogsTab(BaseTab):
     def process_log_queue(self):
         while not self.app.log_queue.empty():
             message = self.app.log_queue.get()
-            self.log_text.config(state=NORMAL)
             self.log_text.insert(END, message + '\n')
-            self.log_text.config(state=DISABLED)
             self.log_text.yview(END)
         self.after(100, self.process_log_queue)
 
