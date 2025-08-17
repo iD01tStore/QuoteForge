@@ -49,7 +49,11 @@ REQUIRED_PACKAGES = [
     ("ttkbootstrap", "ttkbootstrap"),
     ("reportlab", "reportlab"),
     ("requests", "requests"),
+
     ("pypdf", "pypdf"),
+=======
+    ("pypdf", "PyPDF2"),
+
     ("pdfminer.six", "pdfminer.six"),
     ("docx", "python-docx"),
     ("PIL", "Pillow"),
@@ -930,6 +934,11 @@ class SoumissionReaderTab(BaseTab):
         scrolled_review.columnconfigure(1, weight=1) # Make entry widgets expand
 
         self.review_widgets_frame = scrolled_review
+
+        scrolled_review.inner.columnconfigure(1, weight=1) # Make entry widgets expand
+
+        self.review_widgets_frame = scrolled_review.inner
+
         self.review_vars = {}
 
         # Line Items Tab
