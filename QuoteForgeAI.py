@@ -619,6 +619,7 @@ class AIProvider:
         if self.config.get("gemini_api_key"): return "gemini"
         if self.config.get("openai_api_key"): return "openai"
         if self.config.get("anthropic_api_key"): return "anthropic"
+        if self.config.get("cohere_api_key"): return "cohere"
         # Check if Ollama is running
         try:
             requests.get(self.config.get("ollama_base_url", "http://localhost:11434"), timeout=1)
@@ -633,41 +634,53 @@ class AIProvider:
             self._log("No AI provider configured or available.")
             return {"error": "No AI provider is configured or available."}
 
-        try:
-            if provider == "gemini":
-                return self._gemini_complete(prompt, max_tokens, system, temperature, is_json)
-            elif provider == "openai":
-                return self._openai_complete(prompt, max_tokens, system, temperature, is_json)
-            elif provider == "anthropic":
-                return self._anthropic_complete(prompt, max_tokens, system, temperature, is_json)
-            elif provider == "ollama":
-                return self._ollama_complete(prompt, max_tokens, system, temperature, is_json)
-        except Exception as e:
-            self._log(f"AI completion error with {provider}: {e}")
-            logger.error(f"AI completion error with {provider}: {e}")
-            return {"error": str(e)}
+        if provider == "gemini":
+            return self._gemini_complete(prompt, max_tokens, system, temperature, is_json)
+        elif provider == "openai":
+            return self._openai_complete(prompt, max_tokens, system, temperature, is_json)
+        elif provider == "anthropic":
+            return self._anthropic_complete(prompt, max_tokens, system, temperature, is_json)
+        elif provider == "cohere":
+            return self._cohere_complete(prompt, max_tokens, system, temperature, is_json)
+        elif provider == "ollama":
+            return self._ollama_complete(prompt, max_tokens, system, temperature, is_json)
+
+        # Fallback for unimplemented providers
+        return {"error": f"Provider '{provider}' is not yet implemented."}
 
     def _gemini_complete(self, prompt, max_tokens, system, temperature, is_json):
-        api_key = self.config["gemini_api_key"]
-        if not genai:
-            return {"error": "Google GenerativeAI library not installed. Please install it."}
+        try:
+            api_key = self.config["gemini_api_key"]
+            if not genai:
+                return {"error": "Google GenerativeAI library not installed. Please install it."}
 
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel('gemini-1.5-flash')
 
-        generation_config = genai.types.GenerationConfig(
-            max_output_tokens=max_tokens,
-            temperature=temperature,
-            response_mime_type="application/json" if is_json else "text/plain",
-        )
+            generation_config = genai.types.GenerationConfig(
+                max_output_tokens=max_tokens,
+                temperature=temperature,
+                response_mime_type="application/json" if is_json else "text/plain",
+            )
 
-        full_prompt = []
-        if system:
-            full_prompt.append(system)
-        full_prompt.append(prompt)
+            full_prompt = []
+            if system:
+                full_prompt.append(system)
+            full_prompt.append(prompt)
 
-        response = model.generate_content(full_prompt, generation_config=generation_config)
-        return {"content": response.text}
+            response = model.generate_content(full_prompt, generation_config=generation_config)
+            return {"content": response.text}
+        except Exception as e:
+            err_str = str(e).lower()
+            err_msg = f"Gemini API Error: {e}"
+            if "api key not valid" in err_str:
+                err_msg = "Gemini API Error: The provided API Key is not valid. Please check your settings."
+            elif "rate limit" in err_str:
+                err_msg = "Gemini API Error: Rate limit exceeded. Please wait and try again later."
+
+            self._log(err_msg)
+            logger.error(f"Gemini API Error: {e}", exc_info=True)
+            return {"error": err_msg}
 
     def _openai_complete(self, prompt, max_tokens, system, temperature, is_json):
         api_key = self.config["openai_api_key"]
@@ -687,9 +700,25 @@ class AIProvider:
         if is_json:
             json_data["response_format"] = {"type": "json_object"}
 
-        response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=json_data, timeout=120)
-        response.raise_for_status()
-        return {"content": response.json()["choices"][0]["message"]["content"]}
+        try:
+            response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=json_data, timeout=120)
+            response.raise_for_status()  # Raises HTTPError for 4xx/5xx responses
+            return {"content": response.json()["choices"][0]["message"]["content"]}
+        except requests.exceptions.HTTPError as e:
+            err_msg = f"HTTP Error: {e.response.status_code}."
+            try:
+                err_details = e.response.json()
+                err_msg += f" Details: {err_details.get('error', {}).get('message', e.response.text)}"
+            except json.JSONDecodeError:
+                err_msg += f" Details: {e.response.text}"
+            self._log(f"OpenAI API Error: {err_msg}")
+            logger.error(f"OpenAI API Error: {err_msg}")
+            return {"error": err_msg}
+        except requests.exceptions.RequestException as e:
+            err_msg = f"Network Error: {e}"
+            self._log(f"OpenAI Network Error: {err_msg}")
+            logger.error(f"OpenAI Network Error: {err_msg}")
+            return {"error": err_msg}
 
     def _anthropic_complete(self, prompt, max_tokens, system, temperature, is_json):
         api_key = self.config["anthropic_api_key"]
@@ -710,9 +739,63 @@ class AIProvider:
         if system:
             json_data["system"] = system
 
-        response = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=json_data, timeout=120)
-        response.raise_for_status()
-        return {"content": response.json()["content"][0]["text"]}
+        try:
+            response = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=json_data, timeout=120)
+            response.raise_for_status()
+            return {"content": response.json()["content"][0]["text"]}
+        except requests.exceptions.HTTPError as e:
+            err_msg = f"HTTP Error: {e.response.status_code}."
+            try:
+                err_details = e.response.json()
+                err_msg += f" Details: {err_details.get('error', {}).get('message', e.response.text)}"
+            except json.JSONDecodeError:
+                err_msg += f" Details: {e.response.text}"
+            self._log(f"Anthropic API Error: {err_msg}")
+            logger.error(f"Anthropic API Error: {err_msg}")
+            return {"error": err_msg}
+        except requests.exceptions.RequestException as e:
+            err_msg = f"Network Error: {e}"
+            self._log(f"Anthropic Network Error: {err_msg}")
+            logger.error(f"Anthropic Network Error: {err_msg}")
+            return {"error": err_msg}
+
+    def _cohere_complete(self, prompt, max_tokens, system, temperature, is_json):
+        api_key = self.config["cohere_api_key"]
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+
+        # NOTE: Cohere's API uses 'USER' role, not 'user'
+        messages = [{"role": "USER", "message": prompt}]
+        if system:
+            # In Cohere's API, the system prompt is called a 'preamble'
+            pass # Preamble is a top-level key, not a message role.
+
+        json_data = {
+            "model": "command-r",
+            "messages": messages,
+            "temperature": temperature,
+        }
+        if system:
+            json_data['preamble'] = system
+
+        try:
+            response = requests.post("https://api.cohere.com/v1/chat", headers=headers, json=json_data, timeout=120)
+            response.raise_for_status()
+            # The response structure is different from others.
+            return {"content": response.json().get('text', '')}
+        except requests.exceptions.HTTPError as e:
+            err_msg = f"Cohere HTTP Error: {e.response.status_code}."
+            self._log(f"Cohere API Error: {err_msg} - {e.response.text}")
+            logger.error(f"Cohere API Error: {err_msg} - {e.response.text}")
+            return {"error": err_msg}
+        except requests.exceptions.RequestException as e:
+            err_msg = f"Cohere Network Error: {e}"
+            self._log(f"Cohere Network Error: {err_msg}")
+            logger.error(f"Cohere Network Error: {err_msg}")
+            return {"error": err_msg}
 
     def _ollama_complete(self, prompt, max_tokens, system, temperature, is_json):
         url = self.config.get("ollama_base_url", "http://localhost:11434") + "/api/chat"
@@ -734,9 +817,20 @@ class AIProvider:
         if is_json:
             json_data["format"] = "json"
 
-        response = requests.post(url, json=json_data, timeout=120)
-        response.raise_for_status()
-        return {"content": response.json()["message"]["content"]}
+        try:
+            response = requests.post(url, json=json_data, timeout=120)
+            response.raise_for_status()
+            return {"content": response.json()["message"]["content"]}
+        except requests.exceptions.HTTPError as e:
+            err_msg = f"Ollama HTTP Error: {e.response.status_code}. Is Ollama running and the model installed?"
+            self._log(err_msg)
+            logger.error(err_msg)
+            return {"error": err_msg}
+        except requests.exceptions.RequestException as e:
+            err_msg = f"Ollama Network Error: {e}. Is the Ollama server running at {url}?"
+            self._log(err_msg)
+            logger.error(err_msg)
+            return {"error": err_msg}
 
 
 class AsyncHandler:
@@ -1031,42 +1125,49 @@ class SoumissionReaderTab(BaseTab):
     def _run_ai_extraction(self):
         extraction_schema = """
         {
-          "project": {"name": "", "location": "", "owner": "", "gc": "", "tender_number": "", "addenda": []},
-          "timeline": {"start_date": "", "completion": "", "milestones": [], "penalties": ""},
-          "items": [{"code": "", "description": "", "qty": 0, "unit": "", "unit_price": 0.0, "line_total": 0.0}],
-          "pricing": {"subtotal": 0.0, "taxes": [{"name": "GST", "rate": 0.05, "amount": 0.0}, {"name": "QST", "rate": 0.09975, "amount": 0.0}], "total": 0.0},
-          "allowances": [], "alternates": [], "exclusions": [],
+          "project": {"name": "...", "location": "...", "owner": "...", "gc": "...", "tender_number": "...", "addenda": []},
+          "timeline": {"start_date": "YYYY-MM-DD", "completion": "...", "milestones": [], "penalties": ""},
+          "items": [{"code": "", "description": "...", "qty": 1.0, "unit": "each", "unit_price": 100.0, "line_total": 100.0}],
+          "pricing": {"subtotal": 0.0, "taxes": [{"name": "GST", "rate": 0.05, "amount": 0.0}], "total": 0.0},
           "bonding": "", "warranty": "", "holdback": "10%", "insurance": "", "permits": "", "safety": "",
-          "change_orders": "", "signatures": [], "contacts": [],
-          "risks": [{"note": "", "level": "low|medium|high"}],
-          "confidence": 0.0
+          "change_orders": "", "signatures": [], "contacts": [], "exclusions": [],
+          "risks": [{"note": "...", "level": "low"}],
+          "confidence": 0.85
         }
         """
-        system_prompt = f"""
+        system_prompt_template = """
         You are an expert assistant for construction project estimation in Canada.
-        Your task is to extract structured information from the provided document text.
-        Analyze the text and populate the fields in the following JSON schema.
-        Be precise. If a value is not found, use null, an empty string "", 0 for numbers, or an empty list [].
-        Do not invent information. For the 'items' array, extract every billable line item you can find.
-        Calculate line_total if possible (qty * unit_price).
-        Estimate your overall confidence in the extraction on a scale of 0.0 to 1.0.
-        Your output MUST be a valid JSON object matching this schema, and nothing else.
-        {extraction_schema}
+        Your task is to meticulously extract structured information from the provided document text.
+        Populate the fields in the following JSON schema. Adhere strictly to the data types.
+        - For the 'items' array, extract every billable line item. Ensure 'qty', 'unit_price', and 'line_total' are valid numbers (float or integer), not strings. If a value is not found, use 0.0.
+        - Do not invent information. If a field is not present in the document, use null, an empty string "", or 0 for numbers.
+        - Your entire output MUST be a single, valid JSON object and nothing else. Do not include any text or markdown formatting before or after the JSON object.
+        - JSON Schema to follow: {schema}
+        {retry_message}
         """
 
         prompt = f"Here is the document text to analyze:\n\n---\n\n{self.file_content[:24000]}\n\n---\n\nPlease extract the data into the specified JSON format."
 
+        retry_message = ""
         for attempt in range(2): # Retry logic
+            system_prompt = system_prompt_template.format(schema=extraction_schema, retry_message=retry_message)
+
             result = self.app.ai_provider.ai_complete(prompt, system=system_prompt, is_json=True, temperature=0.1)
+
             if "content" in result:
                 try:
-                    json_str = result["content"].strip().replace("```json", "").replace("```", "")
+                    json_str = result["content"].strip()
+                    if json_str.startswith("```json"):
+                        json_str = json_str[7:]
+                    if json_str.endswith("```"):
+                        json_str = json_str[:-3]
+
                     self.extracted_data = json.loads(json_str)
                     return self.extracted_data
                 except json.JSONDecodeError as e:
                     logger.error(f"AI extraction JSON decode error (attempt {attempt+1}): {e}")
-                    self.app.log_to_widget(f"Warning: AI returned invalid JSON. Retrying...")
-                    system_prompt += "\n\nIMPORTANT: Your previous response was not valid JSON. Please ensure your entire output is a single, valid JSON object and nothing else."
+                    self.app.log_to_widget(f"Warning: AI returned invalid JSON. Retrying with a more constrained prompt...")
+                    retry_message = "\n\nIMPORTANT: Your previous output failed JSON validation. Please double-check your response to ensure it is a single, perfectly-formed JSON object and that all numbers in the 'items' array are formatted as numbers, not strings."
             else:
                 return {"error": result.get("error", "Unknown AI error")}
 
@@ -1572,8 +1673,11 @@ class ContractBuilderTab(BaseTab):
         btn_frame = ttk.Frame(self)
         btn_frame.grid(row=1, column=1, sticky='e', pady=10)
 
+        btn_enhance = ttk.Button(btn_frame, text="AI Enhance", command=self.ai_enhance_text, bootstyle=INFO)
+        btn_enhance.pack(side=LEFT, padx=(0, 10))
+
         btn_export = ttk.Button(btn_frame, text="Export Contract to PDF", command=self.export_contract_pdf, bootstyle=SUCCESS)
-        btn_export.pack()
+        btn_export.pack(side=LEFT)
 
     def export_contract_pdf(self):
         filename = filedialog.asksaveasfilename(
@@ -1606,6 +1710,33 @@ class ContractBuilderTab(BaseTab):
         except Exception as e:
             logger.error(f"Failed to generate contract PDF: {e}", exc_info=True)
             messagebox.showerror("PDF Error", f"Could not create PDF file.\n{e}")
+
+    def ai_enhance_text(self):
+        original_text = self.text_editor.get("1.0", END)
+        if len(original_text.strip()) < 20:
+            messagebox.showwarning("Not enough text", "Please enter more text into the editor before using AI Enhance.")
+            return
+
+        self.app.log_to_widget("AI Enhance in progress...")
+
+        system_prompt = "You are an expert legal assistant. Your task is to enhance the following contract text. Improve its clarity, professionalism, and legal robustness while preserving the original meaning. Return only the full, enhanced contract text and nothing else."
+
+        self.app.async_handler.run(
+            self.app.ai_provider.ai_complete,
+            args=(original_text,),
+            kwargs={'system': system_prompt, 'temperature': 0.5},
+            callback=self.on_ai_enhance_complete
+        )
+
+    def on_ai_enhance_complete(self, result):
+        self.app.log_to_widget("AI Enhance complete.")
+        if "error" in result:
+            messagebox.showerror("AI Enhance Error", f"Could not enhance the text.\n{result['error']}")
+        else:
+            enhanced_text = result.get("content", "")
+            if messagebox.askyesno("Apply Enhancement?", "The AI has enhanced the text. Do you want to replace the current text with the enhanced version?"):
+                self.text_editor.delete("1.0", END)
+                self.text_editor.insert(END, enhanced_text)
 
 class ClientManagerTab(BaseTab):
     def __init__(self, master, app_controller):
