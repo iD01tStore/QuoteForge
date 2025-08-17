@@ -1,4 +1,12 @@
-# QuoteForgeAI Pro
+# QuoteForgeAI Pro  
+![Price](https://img.shields.io/badge/Price-$299%20CAD-blue?style=for-the-badge&logo=cashapp&logoColor=white)  
+![License](https://img.shields.io/badge/Lifetime%20License-✔-green?style=for-the-badge&logo=checkmarx&logoColor=white)  
+![Updates](https://img.shields.io/badge/Future%20Updates-Included-brightgreen?style=for-the-badge&logo=gitbook&logoColor=white)  
+
+**Premium AI-Powered Quote, Contract, and Soumission Reader for Construction & Services**  
+**Version 1.0.0**  
+Created by **iD01t Productions**
+
 
 **Premium AI-Powered Quote, Contract, and Soumission Reader for Construction & Services**
 **Version 1.0.0**
