@@ -1894,7 +1894,6 @@ class QuoteForgeAIProApp(ttk.Window):
         self.apply_theme()
 
         self.create_widgets()
-        splash_root.destroy()
         logger.info(f"{APP_NAME} v{APP_VERSION} started successfully.")
 
     def apply_theme(self):
